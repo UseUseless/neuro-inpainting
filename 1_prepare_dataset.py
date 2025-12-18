@@ -9,9 +9,13 @@
 Выход: Структурированная папка datasets/prepared.
 """
 
+import os
 import shutil
 import random
 from pathlib import Path
+from PIL import Image
+from tqdm import tqdm
+
 
 # === Настройки ===
 # Откуда берем (твоя папка с разметкой)
@@ -22,6 +26,11 @@ DEST_DIR = Path("datasets/prepared")
 TRAIN_RATIO = 0.8
 # Папка, где лежат подготовленные лейблы (и train, и val)
 BASE_DIR = Path("datasets/prepared/labels")
+# Папки с картинками для обучения
+TARGET_DIRS = [
+    Path("datasets/prepared/images/train"),
+    Path("datasets/prepared/images/val")
+]
 
 
 def prepare_data():
@@ -134,6 +143,31 @@ def fix_labels():
 
     print(f"✅ Готово! Исправлено файлов: {fixed_count}")
 
+
+def clean_images():
+    print("🧹 Начинаем чистку изображений...")
+
+    for folder in TARGET_DIRS:
+        if not folder.exists():
+            continue
+
+        files = list(folder.glob("*.*"))
+        for img_path in tqdm(files, desc=f"Cleaning {folder.name}"):
+            try:
+                # Читаем картинку
+                with Image.open(img_path) as img:
+                    # Конвертируем в RGB (убирает лишние каналы и битые заголовки)
+                    img = img.convert("RGB")
+                    # Перезаписываем поверх старой
+                    img.save(img_path, "JPEG", quality=100)
+            except Exception as e:
+                print(f"❌ Удаляем совсем битый файл: {img_path}")
+                os.remove(img_path)
+
+    print("✅ Все картинки пересохранены и вылечены.")
+
+
 if __name__ == "__main__":
     prepare_data()
     fix_labels()
+    clean_images()
