@@ -1,12 +1,19 @@
+import sys
+from pathlib import Path
+
+# Добавляем корневую папку проекта в пути поиска Python
+project_root = Path(__file__).resolve().parent.parent
+sys.path.append(str(project_root))
+
 import shutil
 from pathlib import Path
 from PIL import Image
 import config
-from core.detector import WatermarkDetector
+from core.detector import YourClassDetector
 from core.segmenter import MaskRefiner
 from core.cleaner import ImageInpainter
 
-TEST_OUTPUT_DIR = Path("tests/step3_cleaning")
+TEST_OUTPUT_DIR = Path("bench_tests/step3_cleaning")
 
 
 def test_cleaner():
@@ -15,7 +22,7 @@ def test_cleaner():
     TEST_OUTPUT_DIR.mkdir(parents=True)
 
     print("⏳ Загрузка ВСЕХ моделей...")
-    detector = WatermarkDetector()
+    detector = YourClassDetector()
     refiner = MaskRefiner()
     cleaner = ImageInpainter()
 
@@ -27,18 +34,18 @@ def test_cleaner():
                 original = img.convert("RGB")
 
                 # 1. Detect
-                boxes = detector.detect(original)
-                if not boxes:
+                detections = detector.detect(original)
+                if not detections:
+                    print(f"Skipped {img_path.name} (no detections)")
                     continue
 
                 # 2. Segment
-                mask = refiner.create_mask(original, boxes)
+                mask = refiner.create_mask(original, detections)
 
                 # 3. Clean
                 cleaned = cleaner.clean(original, mask)
 
-                # 4. Создаем коллаж (Триптих)
-                # Ширина = 3 картинки, Высота = 1 картинка
+                # 4. Создаем коллаж (Триптих: Оригинал | Маска | Итог)
                 w, h = original.size
                 collage = Image.new("RGB", (w * 3, h))
 
@@ -57,7 +64,7 @@ def test_cleaner():
         except Exception as e:
             print(f"❌ Error {img_path.name}: {e}")
 
-    print(f"\n📂 Коллажи здесь: {TEST_OUTPUT_DIR.absolute()}")
+    print(f"\n📂 Сравни результаты здесь: {TEST_OUTPUT_DIR.absolute()}")
 
 
 if __name__ == "__main__":

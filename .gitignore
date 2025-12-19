@@ -54,3 +54,6 @@ classes.txt
 
 # LabelImg
 labelimg/
+
+# Тесты
+bench_tests/

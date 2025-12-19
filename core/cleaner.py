@@ -1,62 +1,72 @@
 """
-Удаляет по маске (LaMa) после сегментации
+Модуль Очистки (Inpainting).
+Заполняет вырезанные области (маску) сгенерированным фоном.
 
-Загружает LaMa - модель для изменения изображения.
-
-Принимает картинку + маску (после сегментации) -> Отдает чистое изображение без следов удаления.
+Использует LaMa (Large Mask Inpainting). Это SOTA (State of the Art) решение
+для восстановления фона. Оно работает намного лучше, чем старые методы (Telea, Navier-Stokes).
 """
 
 import logging
 from PIL import Image
 from simple_lama_inpainting import SimpleLama
-
+import config
 
 class ImageInpainter:
     """
-    Отвечает за удаление твоего класса (Inpainting) с помощью LaMa.
+    Класс-обертка для LaMa.
+    Принимает изображение и маску, возвращает чистое изображение.
     """
 
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.logger.info("Loading LaMa model...")
+        self.logger.info("⏳ Инициализация LaMa Inpainting...")
 
-        # SimpleLama сама скачает веса при первом запуске
-        # Она автоматически использует GPU, если установлен onnxruntime-gpu
-        # (или CPU, если нет, но это тоже работает достаточно быстро)
         try:
+            # SimpleLama сама скачает веса (big-lama.pt) при первом запуске.
+            # Она автоматически найдет GPU, если установлен onnxruntime-gpu.
             self.model = SimpleLama()
-            self.logger.info("LaMa model loaded successfully.")
+            self.logger.info("✅ LaMa успешно загружена.")
         except Exception as e:
-            self.logger.error(f"Failed to load LaMa: {e}")
+            self.logger.critical(f"❌ Фатальная ошибка при загрузке LaMa: {e}")
+            self.logger.critical("   -> Проверь интернет (для скачивания весов) и версию onnxruntime.")
             raise e
 
     def clean(self, image: Image.Image, mask: Image.Image) -> Image.Image:
         """
-        Принимает оригинал и ч/б маску.
-        Возвращает очищенное изображение.
+        Удаляет объекты с изображения по маске.
+
+        Args:
+            image: Исходное цветное изображение (PIL RGB).
+            mask: Черно-белая маска (PIL L), где белое = область удаления.
+
+        Returns:
+            Очищенное изображение (PIL RGB).
         """
-        # 1. Быстрая проверка: если маска полностью черная (твоего класса нет),
-        # то не тратим время на нейросеть, возвращаем оригинал.
+        # 1. ОПТИМИЗАЦИЯ: Если маска черная (пустая), ничего не делаем.
+        # Метод getbbox() возвращает None, если картинка полностью черная.
         if not mask.getbbox():
-            self.logger.debug("Empty mask provided. Skipping inpainting.")
+            # self.logger.debug("Маска пуста. Возвращаем оригинал.")
             return image
 
         try:
-            # 2. Запуск удаления
-            # LaMa ожидает PIL Images
+            # 2. Запуск нейросети
+            # LaMa принимает PIL Images и возвращает PIL Image.
+            # Внутри simple_lama уже есть препроцессинг (ресайз и паддинг),
+            # поэтому можно скармливать картинки любого размера.
             result = self.model(image, mask)
 
             return result
 
         except Exception as e:
-            self.logger.error(f"Error during inpainting: {e}")
-            # В случае ошибки возвращаем оригинал, чтобы не крашить программу
+            self.logger.error(f"❌ Ошибка во время очистки (LaMa): {e}")
+            # В случае сбоя лучше вернуть оригинал (с ватермаркой),
+            # чем крашить весь пайплайн или возвращать черный квадрат.
             return image
 
-
+# Тест модуля
 if __name__ == "__main__":
     try:
         cleaner = ImageInpainter()
-        print("✅ Cleaner initialized.")
+        print("Тест инициализации пройден.")
     except Exception as e:
-        print(e)
+        print(f"Ошибка: {e}")

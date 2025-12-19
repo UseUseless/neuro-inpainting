@@ -1,73 +1,80 @@
-import shutil
+import sys
 from pathlib import Path
+
+project_root = Path(__file__).resolve().parent.parent
+sys.path.append(str(project_root))
+
+import shutil
+import numpy as np
 from PIL import Image, ImageDraw
 import config
-from core.detector import WatermarkDetector
+from core.detector import YourClassDetector
 from core.segmenter import MaskRefiner
 
-TEST_OUTPUT_DIR = Path("tests/step2_segmentation")
+TEST_OUTPUT_DIR = Path("bench_tests/step2_segmentation")
 
 
-def test_segmenter():
-    if TEST_OUTPUT_DIR.exists():
-        shutil.rmtree(TEST_OUTPUT_DIR)
+def test_segmenter_visual():
+    if TEST_OUTPUT_DIR.exists(): shutil.rmtree(TEST_OUTPUT_DIR)
     TEST_OUTPUT_DIR.mkdir(parents=True)
 
-    print("⏳ Загрузка моделей (Detector + Segmenter)...")
-    detector = WatermarkDetector()
+    print("⏳ Загрузка Detector + Segmenter...")
+    detector = YourClassDetector()
     refiner = MaskRefiner()
 
-    files = [f for f in config.INPUT_DIR.glob("*.*") if f.suffix.lower() in {'.jpg', '.png', '.jpeg', '.webp'}]
-    print(f"📸 Обработка {len(files)} фото...")
+    files = list(config.INPUT_DIR.glob("*.*"))
+    files = [f for f in files if f.suffix.lower() in {'.jpg', '.png'}]
+
+    print(f"📸 Генерация масок для {len(files)} фото...")
 
     for img_path in files:
-        try:
-            with Image.open(img_path) as img:
-                original = img.convert("RGB")
+        with Image.open(img_path) as img:
+            original = img.convert("RGB")
+            w, h = original.size
 
-                # 1. Detect
-                boxes = detector.detect(original)
-                if not boxes:
-                    print(f"⚠️ Skip: {img_path.name}")
-                    continue
+            # 1. Detect
+            detections = detector.detect(original)
+            if not detections: continue
 
-                # 2. Segment (получаем ч/б маску)
-                mask = refiner.create_mask(original, boxes)
+            # 2. Segment
+            mask = refiner.create_mask(original, detections)
 
-                # 3. Визуализация (Оверлей)
-                # Создаем красную заливку
-                red_layer = Image.new("RGB", original.size, (255, 0, 0))
+            # === ВИЗУАЛИЗАЦИЯ ===
 
-                # Используем маску как альфа-канал для красного слоя
-                # Там где маска белая -> будет красное. Где черная -> прозрачно.
-                overlay = Image.composite(red_layer, original, mask)
+            # A. Оригинал с рамками (для сравнения)
+            vis_box = original.copy()
+            draw = ImageDraw.Draw(vis_box)
+            for det in detections:
+                x1, y1, x2, y2, _, cls_id = det
+                # Цвет рамки зависит от класса
+                color = "cyan" if cls_id == 0 else "magenta"
+                draw.rectangle([x1, y1, x2, y2], outline=color, width=3)
 
-                # Смешиваем оригинал и оверлей (50% прозрачности)
-                # Но лучше сделать умнее: наложить красное ТОЛЬКО там где маска
-                final_vis = original.convert("RGBA")
-                mask_rgba = mask.convert("L")
+            # B. Наложение маски (Красный полупрозрачный слой)
+            vis_overlay = original.convert("RGBA")
+            # Создаем красную картинку
+            red_layer = Image.new("RGBA", (w, h), (255, 0, 0, 120))
+            # Используем маску как альфа-канал для красного слоя
+            mask_l = mask.convert("L")
 
-                # Создаем полупрозрачный красный слой только для маски
-                red_overlay = Image.new("RGBA", original.size, (255, 0, 0, 100))  # 100 = прозрачность
-                final_vis.paste(red_overlay, (0, 0), mask_rgba)
+            # Накладываем
+            vis_overlay.paste(red_layer, (0, 0), mask_l)
+            vis_overlay = vis_overlay.convert("RGB")
 
-                # Рисуем еще и рамку для наглядности
-                draw = ImageDraw.Draw(final_vis)
-                pad = config.BOX_PADDING
-                w, h = original.size
-                for x1, y1, x2, y2 in boxes:
-                    nx1, ny1 = max(0, x1 - pad), max(0, y1 - pad)
-                    nx2, ny2 = min(w, x2 + pad), min(h, y2 + pad)
-                    draw.rectangle([nx1, ny1, nx2, ny2], outline="blue", width=2)
+            # C. Сама маска (ЧБ)
+            vis_bw = mask.convert("RGB")
 
-                final_vis.convert("RGB").save(TEST_OUTPUT_DIR / f"seg_{img_path.name}")
-                print(f"✅ Saved: seg_{img_path.name}")
+            # Собираем коллаж: Рамки | Наложение | ЧБ Маска
+            collage = Image.new("RGB", (w * 3, h))
+            collage.paste(vis_box, (0, 0))
+            collage.paste(vis_overlay, (w, 0))
+            collage.paste(vis_bw, (w * 2, 0))
 
-        except Exception as e:
-            print(f"❌ Error {img_path.name}: {e}")
+            collage.save(TEST_OUTPUT_DIR / f"mask_{img_path.name}")
+            print(f"✅ {img_path.name}")
 
-    print(f"\n📂 Результаты: {TEST_OUTPUT_DIR.absolute()}")
+    print(f"\n📂 Открой папку и проверь маски: {TEST_OUTPUT_DIR.absolute()}")
 
 
 if __name__ == "__main__":
-    test_segmenter()
+    test_segmenter_visual()
