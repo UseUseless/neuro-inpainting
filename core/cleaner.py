@@ -2,8 +2,7 @@
 Модуль Очистки (Inpainting).
 Заполняет вырезанные области (маску) сгенерированным фоном.
 
-Использует LaMa (Large Mask Inpainting). Это SOTA (State of the Art) решение
-для восстановления фона. Оно работает намного лучше, чем старые методы (Telea, Navier-Stokes).
+Использует LaMa (Large Mask Inpainting) для восстановления фона.
 """
 
 import logging

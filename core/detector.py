@@ -1,6 +1,5 @@
 """
 Модуль Детекции (YOLO-Seg).
-Использует параметры из config.py (CLAHE, TTA).
 """
 
 import logging
