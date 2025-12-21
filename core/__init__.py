@@ -6,10 +6,10 @@ yolo -> sam -> lama
 
 
 ---
-/dataset_raw
+/train_dataset
 Фото и txt после разметки
 
-dataset_raw/ (пример структуры папки)
+train_dataset/ (пример структуры папки)
 ├── img_001.jpg   (Картинка)
 ├── img_001.txt   (Координаты рамки, которые сделал в LabelImg)
 ├── img_002.jpg

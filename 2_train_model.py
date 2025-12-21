@@ -1,11 +1,5 @@
 """
-Запуск обучения YOLO
-
-Этот скрипт берет подготовленные данные и учит нейросеть находить твои объекты.
-Он автоматически подхватит количество классов из файла data.yaml.
-
-Вход: datasets/prepared/data.yaml
-Выход: runs/detect/train_run/weights/best.pt
+Скрипт обучения YOLOv11-SEG.
 """
 
 import os
@@ -15,130 +9,161 @@ from pathlib import Path
 from ultralytics import YOLO
 import config
 
-# Фикс для частой ошибки на Windows (OMP: Error #15)
 os.environ["KMP_DUPLICATE_LIB_OK"] = "TRUE"
-
-# Папка, куда YOLO будет складывать результаты
-RUNS_DIR = Path("runs/detect")
-DATA_YAML = Path("datasets/prepared/data.yaml")
+RUNS_DIR = Path("runs/segment")
+DATA_YAML = config.TRAIN_DATASET_DIR / "data.yaml"
 
 def train():
-    print(f"🚀 Запуск скрипта обучения...")
+    print(f"🚀 Запуск обучения...")
 
-    # 1. Проверка наличия данных
     if not DATA_YAML.exists():
-        print(f"❌ ОШИБКА: Не найден файл конфигурации: {DATA_YAML}")
-        print("   -> Сначала запусти '1_prepare_dataset.py'!")
+        print(f"❌ Не найден {DATA_YAML}. Запусти генератор!")
         return
 
-    # 2. Загружаем модель
-    # yolo11n.pt - самая легкая и быстрая (nano).
-    # Если качество будет низким, можно поменять на yolo11s.pt (small) в config.py
-    print(f"⏳ Загрузка базовой модели: {config.YOLO_MODEL_NAME}...")
-    model = YOLO(config.YOLO_MODEL_NAME)
+    print(f"⏳ Загрузка: {config.YOLO_MODEL_NAME}...")
+    try:
+        model = YOLO(config.YOLO_MODEL_NAME)
+    except Exception as e:
+        print(f"❌ Ошибка загрузки модели: {e}")
+        return
 
-    print("🔥 Начинаем процесс обучения. Это может занять время...")
-    print(f"   Устройство: {config.DEVICE}")
+    print(f"🔥 Старт (Epochs={config.TRAIN_EPOCHS}, Batch={config.TRAIN_BATCH})...")
 
-    # 3. Запуск обучения
     try:
         results = model.train(
             data=str(DATA_YAML),
-
-            # === ГЛАВНЫЕ ПАРАМЕТРЫ ===
-            epochs=100,         # 100 эпох обычно достаточно для простой задачи
-            imgsz=640,          # Размер картинки (стандарт YOLO)
-            patience=15,        # Если 15 эпох нет улучшений - стоп (Early Stopping)
-            batch=2,            # Сколько картинок за раз (если вылетает OutOfMemory, ставь 2 или 1)
-
-            # === ТЕХНИЧЕСКИЕ НАСТРОЙКИ ===
-            device=0 if config.DEVICE == 'cuda' else 'cpu',
-            workers=0,          # Для Windows лучше 0, чтобы не было ошибок мультипроцессинга
-            project="runs/detect",
-            name="train_run",   # Имя папки с результатами
-            exist_ok=True,      # Перезаписывать папку, если существует (чтобы не плодить train_run2, train_run3)
-
-            # === ГРАФИКА И ЭКОНОМИЯ ===
-            plots=False,        # Не рисовать графики встроенными средствами (мы нарисуем свои, легче)
-            save=True,          # Сохранять веса (best.pt)
-            val=True,           # Проверять качество на валидации
-            amp=False           # Отключаем Mixed Precision (иногда глючит на мобильных RTX картах)
+            epochs=config.TRAIN_EPOCHS,
+            imgsz=config.TRAIN_IMG_SIZE,
+            patience=config.TRAIN_PATIENCE,
+            batch=config.TRAIN_BATCH,
+            workers=config.TRAIN_WORKERS,
+            mosaic=config.TRAIN_MOSAIC,
+            hsv_h=config.TRAIN_HSV_H,
+            hsv_s=config.TRAIN_HSV_S,
+            hsv_v=config.TRAIN_HSV_V,
+            scale=config.TRAIN_SCALE,
+            project="runs/segment",
+            name="train_seg_run",
+            exist_ok=True,
+            save=True,
+            val=True,
+            plots=False,
+            device=0 if config.DEVICE == 'cuda' else 'cpu'
         )
 
-        print("\n🏁 Обучение завершено успешно!")
-
-        # Путь к результату
-        best_weight = RUNS_DIR / "train_run" / "weights" / "best.pt"
-        print(f"💎 ЛУЧШАЯ МОДЕЛЬ: {best_weight}")
-        print("👉 НЕ ЗАБУДЬ: Скопируй этот файл в папку models/ перед запуском пайплайна!")
+        print("\n🏁 Готово!")
+        best_weight = RUNS_DIR / "train_seg_run" / "weights" / "best.pt"
+        print(f"👉 Скопируй этот файл в models/: {best_weight}")
 
     except Exception as e:
-        print(f"\n❌ КРИТИЧЕСКАЯ ОШИБКА ОБУЧЕНИЯ: {e}")
-        import traceback
-        traceback.print_exc()
-
+        print(f"\n❌ Ошибка: {e}")
 
 def plot_training_results():
     """
-    Рисует простые и понятные графики прогресса обучения.
+    Рисует расширенный дашборд из 6 графиков.
     """
-    csv_path = RUNS_DIR / "train_run" / "results.csv"
+    csv_path = RUNS_DIR / "train_seg_run" / "results.csv"
 
     if not csv_path.exists():
-        print(f"⚠️ Нет файла статистики: {csv_path}. Графики не построены.")
+        print(f"⚠️ Файл {csv_path} не найден.")
         return
 
-    print(f"\n📊 Строим графики обучения...")
+    print(f"📊 Генерация дашборда обучения...")
 
-    epochs = []
-    box_loss = []   # Ошибка предсказания рамки
-    map50 = []      # Точность (mAP 50%)
+    data = {
+        'epoch': [],
+        'box_loss_train': [], 'box_loss_val': [],
+        'seg_loss_train': [], 'seg_loss_val': [],
+        'cls_loss_train': [], 'cls_loss_val': [],
+        'map50_mask': [], 'map95_mask': [],
+        'precision_mask': [], 'recall_mask': []
+    }
 
     try:
         with open(csv_path, "r") as f:
             reader = csv.DictReader(f)
-            # Чистим пробелы в названиях колонок YOLO (они любят писать " train/box_loss")
             reader.fieldnames = [name.strip() for name in reader.fieldnames]
 
             for row in reader:
-                epochs.append(int(row['epoch']))
-                box_loss.append(float(row['train/box_loss']))
-                map50.append(float(row['metrics/mAP50(B)']))
+                try:
+                    data['epoch'].append(int(row['epoch']))
+
+                    # Losses
+                    data['box_loss_train'].append(float(row['train/box_loss']))
+                    data['box_loss_val'].append(float(row['val/box_loss']))
+                    data['seg_loss_train'].append(float(row['train/seg_loss']))
+                    data['seg_loss_val'].append(float(row['val/seg_loss']))
+                    data['cls_loss_train'].append(float(row['train/cls_loss']))
+                    data['cls_loss_val'].append(float(row['val/cls_loss']))
+
+                    # Metrics (Mask)
+                    data['map50_mask'].append(float(row['metrics/mAP50(M)']))
+                    data['map95_mask'].append(float(row['metrics/mAP50-95(M)']))
+                    data['precision_mask'].append(float(row['metrics/precision(M)']))
+                    data['recall_mask'].append(float(row['metrics/recall(M)']))
+                except ValueError:
+                    continue
     except Exception as e:
-        print(f"Ошибка чтения CSV: {e}")
+        print(f"❌ Ошибка CSV: {e}")
         return
 
-    # Рисуем
-    plt.figure(figsize=(12, 6))
+    # Настройка графиков (2 строки, 3 колонки)
+    fig, axs = plt.subplots(2, 3, figsize=(20, 10))
+    fig.suptitle('YOLOv11 Segmentation Training Dashboard', fontsize=16)
 
-    # 1. График Ошибки (должен падать)
-    plt.subplot(1, 2, 1)
-    plt.plot(epochs, box_loss, label='Box Loss', color='red', linewidth=2)
-    plt.title('Ошибка (Loss) -> Должна падать')
-    plt.xlabel('Эпохи')
-    plt.ylabel('Loss')
-    plt.grid(True, alpha=0.3)
-    plt.legend()
+    epochs = data['epoch']
 
-    # 2. График Точности (должен расти)
-    plt.subplot(1, 2, 2)
-    plt.plot(epochs, map50, label='mAP 50%', color='green', linewidth=2)
-    plt.title('Точность (Accuracy) -> Должна расти')
-    plt.xlabel('Эпохи')
-    plt.ylabel('mAP (0.0 - 1.0)')
-    plt.grid(True, alpha=0.3)
-    plt.legend()
+    # 1. SEGMENTATION LOSS (Самое важное)
+    axs[0, 0].plot(epochs, data['seg_loss_train'], label='Train', color='red', linestyle='--')
+    axs[0, 0].plot(epochs, data['seg_loss_val'], label='Val', color='darkred', linewidth=2)
+    axs[0, 0].set_title('Ошибка Маски (Seg Loss)')
+    axs[0, 0].set_ylabel('Loss')
+    axs[0, 0].legend()
+    axs[0, 0].grid(True, alpha=0.3)
 
-    output_img = "training_report.png"
-    plt.tight_layout()
+    # 2. BOX LOSS (Геометрия)
+    axs[0, 1].plot(epochs, data['box_loss_train'], label='Train', color='blue', linestyle='--')
+    axs[0, 1].plot(epochs, data['box_loss_val'], label='Val', color='darkblue')
+    axs[0, 1].set_title('Ошибка Рамки (Box Loss)')
+    axs[0, 1].legend()
+    axs[0, 1].grid(True, alpha=0.3)
+
+    # 3. CLASS LOSS (Узнаваемость)
+    axs[0, 2].plot(epochs, data['cls_loss_train'], label='Train', color='orange', linestyle='--')
+    axs[0, 2].plot(epochs, data['cls_loss_val'], label='Val', color='darkorange')
+    axs[0, 2].set_title('Ошибка Класса (Is it watermark?)')
+    axs[0, 2].legend()
+    axs[0, 2].grid(True, alpha=0.3)
+
+    # 4. mAP (Точность общая)
+    axs[1, 0].plot(epochs, data['map50_mask'], label='mAP 50%', color='green', linewidth=2)
+    axs[1, 0].plot(epochs, data['map95_mask'], label='mAP 50-95%', color='lightgreen')
+    axs[1, 0].set_title('Точность Маски (mAP)')
+    axs[1, 0].set_ylabel('Score (0-1)')
+    axs[1, 0].legend()
+    axs[1, 0].grid(True, alpha=0.3)
+
+    # 5. Precision & Recall (Баланс)
+    axs[1, 1].plot(epochs, data['precision_mask'], label='Precision (Меткость)', color='purple')
+    axs[1, 1].plot(epochs, data['recall_mask'], label='Recall (Охват)', color='cyan')
+    axs[1, 1].set_title('Precision vs Recall')
+    axs[1, 1].legend()
+    axs[1, 1].grid(True, alpha=0.3)
+
+    # 6. Сравнение переобучения (Seg Train vs Val)
+    # Показывает разрыв (Gap) между обучением и тестом
+    gap = [v - t for t, v in zip(data['seg_loss_train'], data['seg_loss_val'])]
+    axs[1, 2].plot(epochs, gap, label='Val - Train Gap', color='gray')
+    axs[1, 2].axhline(0, color='black', linestyle='--')
+    axs[1, 2].set_title('Переобучение (Разрыв Loss)')
+    axs[1, 2].legend()
+    axs[1, 2].grid(True, alpha=0.3)
+
+    plt.tight_layout(rect=[0, 0.03, 1, 0.95])
+
+    output_img = "training_dashboard.png"
     plt.savefig(output_img)
-    print(f"✅ График сохранен: {output_img}")
-
-    # Пытаемся показать (если есть GUI)
-    try:
-        plt.show()
-    except:
-        pass
+    print(f"✅ Дашборд сохранен: {output_img}")
 
 if __name__ == "__main__":
     train()

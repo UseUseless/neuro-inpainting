@@ -1,30 +1,25 @@
 """
 Запуск полного цикла обработки (Pipeline).
+Версия: YOLO-SEG (End-to-End).
 
-Цепочка действий:
+Цепочка действий теперь максимально проста:
 1. Загрузка фото.
-2. Detector (YOLO) -> Находит координаты и класс.
-3. Segmenter (MaskRefiner) -> Выбирает стратегию (Box/Sam) и делает маску.
-4. Cleaner (LaMa) -> Закрашивает маску.
-5. Сохранение результата.
+2. Detector (YOLO-Seg) -> Сразу выдает готовую Ч/Б маску.
+3. Cleaner (LaMa) -> Закрашивает маску.
+4. Сохранение.
 
-Особенности:
-- Можно прервать (Ctrl+C) и продолжить позже.
-- Сохраняет структуру папок.
-- Логирует ошибки, но не падает.
+Больше нет отдельного шага сегментации (SAM/Box), всё делает YOLO.
 """
 
 import time
-import shutil
 from pathlib import Path
 from PIL import Image
-from tqdm import tqdm  # Прогресс-бар
+from tqdm import tqdm
 
-# Импорт наших модулей
+# Импорты модулей
 import config
 from core.pipeline_logger import setup_logger
 from core.detector import YourClassDetector
-from core.segmenter import MaskRefiner
 from core.cleaner import ImageInpainter
 
 # Настройка логирования
@@ -37,19 +32,21 @@ def main():
         print(f"Создай папку {config.INPUT_DIR} и положи туда фото!")
         return
 
-    # 2. ЗАГРУЗКА МОДЕЛЕЙ (Самая тяжелая часть)
-    logger.info("⏳ Загрузка нейросетей в память... (подожди 10-20 сек)")
+    # 2. ЗАГРУЗКА МОДЕЛЕЙ
+    logger.info("⏳ Загрузка нейросетей (YOLO-Seg + LaMa)...")
     try:
-        detector = YourClassDetector()  # YOLO
-        segmenter = MaskRefiner()       # SAM / Logic
-        cleaner = ImageInpainter()      # LaMa
-        logger.info("✅ Все модели успешно загружены!")
+        # Detector теперь умный: он сам делает маску
+        detector = YourClassDetector()
+
+        # Cleaner остался прежним
+        cleaner = ImageInpainter()
+
+        logger.info("✅ Модели загружены и готовы к бою!")
     except Exception as e:
-        logger.critical(f"❌ Не удалось загрузить модели: {e}")
+        logger.critical(f"❌ Фатальная ошибка при загрузке: {e}")
         return
 
     # 3. ПОИСК ФАЙЛОВ
-    # Ищем рекурсивно (rglob), чтобы поддерживать вложенные папки
     valid_extensions = {".jpg", ".jpeg", ".png", ".webp", ".bmp"}
     all_files = [
         f for f in config.INPUT_DIR.rglob("*")
@@ -60,32 +57,27 @@ def main():
     logger.info(f"📁 Найдено изображений: {total_files}")
 
     if total_files == 0:
-        logger.warning("Папка пуста. Нечего обрабатывать.")
+        logger.warning("Папка пуста.")
         return
 
-    # 4. ЗАПУСК КОНВЕЙЕРА
+    # 4. ЗАПУСК ОБРАБОТКИ
     start_time = time.time()
     processed_count = 0
     skipped_count = 0
     error_count = 0
-    no_detection_count = 0
+    empty_mask_count = 0 # Сколько раз YOLO ничего не нашла
 
-    print("\n🚀 Поехали! (Нажми Ctrl+C, чтобы остановить мягко)\n")
+    print("\n🚀 Поехали! (Ctrl+C для остановки)\n")
 
     try:
-        # tqdm создает полоску прогресса
         for img_path in tqdm(all_files, desc="Processing", unit="img"):
 
-            # --- Подготовка путей ---
-            # Вычисляем относительный путь (например: subfolder/image.jpg)
+            # --- Пути сохранения (зеркалируем структуру папок) ---
             relative_path = img_path.relative_to(config.INPUT_DIR)
-            # Итоговый путь сохранения
             save_path = config.OUTPUT_DIR / relative_path
-
-            # Создаем папку назначения, если её нет
             save_path.parent.mkdir(parents=True, exist_ok=True)
 
-            # --- ПРОВЕРКА: УЖЕ СДЕЛАНО? ---
+            # --- Идемпотентность (Пропуск готового) ---
             if save_path.exists():
                 skipped_count += 1
                 continue
@@ -93,56 +85,48 @@ def main():
             try:
                 # --- ШАГ 0: Открытие ---
                 with Image.open(img_path) as img:
-                    # Конвертируем в RGB (LaMa не любит CMYK и Transparency)
+                    # LaMa требует RGB
                     original_image = img.convert("RGB")
 
-                # --- ШАГ 1: Детекция (YOLO) ---
-                # detections = [(x1, y1, x2, y2, conf, cls_id), ...]
-                detections = detector.detect(original_image)
+                # --- ШАГ 1: Детекция + Сегментация (YOLO-Seg) ---
+                # Теперь мы просим детектор сразу дать нам МАСКУ (PIL Image)
+                # Он внутри себя прогонит нейросеть, соберет полигоны и нарисует Ч/Б картинку
+                mask = detector.get_mask(original_image)
 
-                if not detections:
-                    # Если ничего не нашли - просто сохраняем оригинал.
-                    # Это важно, чтобы выходная папка была полной копией входной.
-                    original_image.save(save_path, quality=95)
-                    no_detection_count += 1
-                    continue
-
-                # --- ШАГ 2: Сегментация (Mask Creation) ---
-                # Передаем список детекций, сегментер сам решит (Box или Sam)
-                mask = segmenter.create_mask(original_image, detections)
-
-                # --- ШАГ 3: Очистка (Inpainting) ---
-                # Если маска пустая (бывает такое), клинер вернет оригинал
+                # --- ШАГ 2: Очистка (LaMa) ---
+                # Если маска черная (bbox is None), cleaner вернет оригинал моментально
                 result_image = cleaner.clean(original_image, mask)
 
-                # --- ШАГ 4: Сохранение ---
+                # Статистика: нашла ли YOLO что-то?
+                if not mask.getbbox():
+                    empty_mask_count += 1
+
+                # --- ШАГ 3: Сохранение ---
                 result_image.save(save_path, quality=95)
                 processed_count += 1
 
             except Exception as e:
-                logger.error(f"❌ Ошибка на файле {img_path.name}: {e}")
+                logger.error(f"❌ Ошибка на {img_path.name}: {e}")
                 error_count += 1
-                # Записываем имя битого файла, чтобы потом разобраться
+                # Пишем в лог ошибок
                 with open(config.LOG_DIR / "failed_files.txt", "a") as f:
                     f.write(f"{img_path}\n")
 
     except KeyboardInterrupt:
-        logger.warning("\n🛑 Процесс остановлен пользователем (Ctrl+C).")
-        logger.warning("   Прогресс сохранен. Запусти скрипт снова, чтобы продолжить.")
+        logger.warning("\n🛑 Остановлено пользователем.")
 
     # 5. ИТОГИ
     elapsed = time.time() - start_time
     logger.info("=" * 40)
-    logger.info("🏁 Работа завершена!")
-    logger.info(f"⏱  Время: {elapsed:.2f} сек")
-    logger.info(f"✅ Обработано успешно: {processed_count}")
-    logger.info(f"👻 Без ватермарок (копии): {no_detection_count}")
-    logger.info(f"⏭  Пропущено (было готово): {skipped_count}")
+    logger.info(f"⏱  Время выполнения: {elapsed:.2f} сек")
+    logger.info(f"✅ Готово: {processed_count}")
+    logger.info(f"👻 Пустых (не найдено): {empty_mask_count}")
+    logger.info(f"⏭  Пропущено (было): {skipped_count}")
     logger.info(f"❌ Ошибок: {error_count}")
 
     if processed_count > 0:
-        avg_speed = elapsed / processed_count
-        logger.info(f"🚀 Средняя скорость: {avg_speed:.2f} сек/фото")
+        logger.info(f"🚀 Скорость: {elapsed / processed_count:.3f} сек/фото")
+        logger.info(f"🏎  FPS: {processed_count / elapsed:.1f}")
 
 if __name__ == "__main__":
     main()
