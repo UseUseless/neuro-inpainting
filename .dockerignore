@@ -1,0 +1,12 @@
+.git
+.venv
+venv
+__pycache__
+backgrounds
+train_dataset
+dataset_synthetic
+temp_download
+runs
+bench_tests
+logs
+images_cleaned
