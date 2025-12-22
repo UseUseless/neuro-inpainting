@@ -86,6 +86,7 @@ YOLO_CONFIDENCE = 0.15                      # Порог (0.25 видит и я�
 DETECTOR_CLAHE_CLIP = 3.0   # Сила контраста
 DETECTOR_CLAHE_GRID = 8
 DETECTOR_USE_TTA = False    # TTA выключено (YOLO-Seg не поддерживает)
+IS_CLAHE_DETECT = True
 
 # Очистка (LaMa)
 LAMA_MODEL_NAME = "big-lama"

@@ -21,7 +21,7 @@ class YourClassDetector:
         except Exception as e:
             self.logger.critical(f"❌ Ошибка YOLO: {e}")
             raise e
-
+# Может убрать?
     def _enhance_image(self, image: Image.Image) -> Image.Image:
         """CLAHE с настройками из конфига"""
         try:
@@ -48,7 +48,9 @@ class YourClassDetector:
 
     def get_mask(self, image: Image.Image) -> Image.Image:
         w, h = image.size
-        input_image = self._enhance_image(image)
+        input_image = image
+        if config.IS_CLAHE_DETECT:
+            input_image = self._enhance_image(image)
 
         try:
             results = self.model.predict(
