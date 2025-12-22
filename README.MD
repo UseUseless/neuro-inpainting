@@ -99,5 +99,5 @@
 5.  **Работа:**
     Когда контейнер запустился, выполняй скрипты:
     ```bash
-    docker-compose exec app python 3_run_pipeline.py
+    docker-compose exec watermark-remover python 3_run_pipeline.py
     ```
