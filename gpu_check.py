@@ -1,26 +1,45 @@
 """
-Проверки:
--работает ли CUDA;
--точно ли у нас библиотека для работы LaMa на видеокарте, а не на CPU.
+Проверка доступности GPU (NVIDIA CUDA) для PyTorch.
+Теперь без ONNX, так как проект переведен на чистый Torch.
 """
 
+import sys
 import torch
-import onnxruntime as ort
+import platform
 
-print(f"PyTorch version: {torch.__version__}")
-print(f"CUDA available: {torch.cuda.is_available()}")
-if torch.cuda.is_available():
-    print(f"GPU Device: {torch.cuda.get_device_name(0)}")
-else:
-    print("WARNING: Working on CPU!")
+def check_gpu():
+    print("="*40)
+    print(f"🐍 Python: {sys.version.split()[0]} ({platform.system()})")
+    print(f"🔥 PyTorch: {torch.__version__}")
+    print("="*40)
 
-print('='*30)
+    if torch.cuda.is_available():
+        print("✅ CUDA AVAILABLE! Видеокарта обнаружена.")
+        device_count = torch.cuda.device_count()
+        print(f"🔢 Количество GPU: {device_count}")
+        
+        for i in range(device_count):
+            name = torch.cuda.get_device_name(i)
+            mem = torch.cuda.get_device_properties(i).total_memory / 1e9
+            print(f"   👉 GPU {i}: {name} ({mem:.2f} GB VRAM)")
+            
+        print("\n🧪 Тестовый прогон тензоров...")
+        try:
+            x = torch.rand(5, 3).cuda()
+            print("   ✅ Тензор успешно создан в VRAM!")
+            print(f"   Устройство тензора: {x.device}")
+        except Exception as e:
+            print(f"   ❌ Ошибка при работе с VRAM: {e}")
 
-print(f"ONNX Runtime version: {ort.__version__}")
-print(f"ONNX Device: {ort.get_device()}")
-print(f"Available Providers: {ort.get_available_providers()}")
+    else:
+        print("⚠️  CUDA NOT AVAILABLE.")
+        print("   Работаем на процессоре (CPU). Это будет медленно.")
+        print("   Если у тебя NVIDIA карта:")
+        print("   1. Проверь драйверы.")
+        print("   2. Убедись, что установил PyTorch с поддержкой CUDA:")
+        print("      pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu124")
 
-if 'CUDAExecutionProvider' in ort.get_available_providers():
-    print("=) LaMa будет работать на видеокарте (GPU)!")
-else:
-    print("=( LaMa видит только процессор (CPU).")
+    print("="*40)
+
+if __name__ == "__main__":
+    check_gpu()

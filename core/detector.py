@@ -21,40 +21,13 @@ class YourClassDetector:
         except Exception as e:
             self.logger.critical(f"❌ Ошибка YOLO: {e}")
             raise e
-# Может убрать?
-    def _enhance_image(self, image: Image.Image) -> Image.Image:
-        """CLAHE с настройками из конфига"""
-        try:
-            img_np = np.array(image)
-            if len(img_np.shape) == 3:
-                lab = cv2.cvtColor(img_np, cv2.COLOR_RGB2LAB)
-                l, a, b = cv2.split(lab)
-
-                # Берем настройки
-                clip = config.DETECTOR_CLAHE_CLIP
-                grid = config.DETECTOR_CLAHE_GRID
-
-                clahe = cv2.createCLAHE(clipLimit=clip, tileGridSize=(grid,grid))
-                cl = clahe.apply(l)
-
-                limg = cv2.merge((cl, a, b))
-                final = cv2.cvtColor(limg, cv2.COLOR_LAB2RGB)
-            else:
-                clahe = cv2.createCLAHE(clipLimit=config.DETECTOR_CLAHE_CLIP, tileGridSize=(8,8))
-                final = clahe.apply(img_np)
-            return Image.fromarray(final)
-        except Exception:
-            return image
 
     def get_mask(self, image: Image.Image) -> Image.Image:
         w, h = image.size
-        input_image = image
-        if config.IS_CLAHE_DETECT:
-            input_image = self._enhance_image(image)
 
         try:
             results = self.model.predict(
-                source=input_image,
+                source=image,
                 conf=config.YOLO_CONFIDENCE,
                 device=config.DEVICE,
                 verbose=False,
