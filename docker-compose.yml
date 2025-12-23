@@ -3,6 +3,8 @@ services:
     build: .
     image: watermark-remover:latest
     container_name: wm_remover
+    ports:
+      - "8000:8000"
 
     # 🔥 ВКЛЮЧАЕМ ВИДЕОКАРТУ (NVIDIA)
     # На Windows с WSL2 это работает автоматически, если стоят драйверы.

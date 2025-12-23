@@ -1,6 +1,5 @@
 """
 Проверка доступности GPU (NVIDIA CUDA) для PyTorch.
-Теперь без ONNX, так как проект переведен на чистый Torch.
 """
 
 import sys
@@ -37,7 +36,7 @@ def check_gpu():
         print("   Если у тебя NVIDIA карта:")
         print("   1. Проверь драйверы.")
         print("   2. Убедись, что установил PyTorch с поддержкой CUDA:")
-        print("      pip3 install torch torchvision --index-url https://download.pytorch.org/whl/cu124")
+        print("      pip install --force-reinstall torch torchvision --index-url https://download.pytorch.org/whl/cu124")
 
     print("="*40)
 
